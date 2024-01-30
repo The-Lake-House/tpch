@@ -4,3 +4,5 @@
 - `tpch_optimized` contains the second, optimized benchmark for scale factors 2
   and 100
 - `catalog` contains the Trino catalog configuration files
+
+The results are contained in the corresponding `results.tar.gz` file.
