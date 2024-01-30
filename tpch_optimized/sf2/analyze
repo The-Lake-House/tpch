@@ -1,0 +1,8 @@
+#!/usr/bin/env Rscript
+
+library(readr)
+library(dplyr)
+
+read_csv("results/times") %>%
+    group_by(variant) %>%
+    summarize(n = n(), mean = mean(time), sd = sd(time))

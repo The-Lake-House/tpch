@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -eu
+
+mcli mb -p minio/tpch-sf100
+
+mkdir -p results
+
+$TRINO_HOME/bin/trino -f sql/trino.sql
+mcli ls -r minio/tpch/hive > results/ls_hive
+mcli ls -r minio/tpch/iceberg > results/ls_iceberg
+mcli ls -r minio/tpch/delta > results/ls_delta
+
+exit
+
+spark-sql-hms-hudi -f sql/spark.sql
+mcli ls -r minio/tpch/hudi > results/ls_hudi

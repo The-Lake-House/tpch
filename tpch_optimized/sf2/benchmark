@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+set -eu
+
+OUTPUT_PATH=results
+NUM_REPS=30
+NUM_WARMUP=5
+
+mkdir -p "$OUTPUT_PATH"
+
+echo 'variant,rep,time' > "${OUTPUT_PATH}/times"
+for VARIANT in hive hive_128 hive_118 hudi iceberg iceberg_118 delta delta_128 delta_118; do
+    echo "$VARIANT ..."
+    if [[ "$VARIANT" == 'hive_128' ]]; then
+        CATALOG=hive
+        SESSION_PROPERTIES='--session hive.max_initial_split_size=128MB --session hive.max_split_size=128MB'
+        SCHEMA=tpch_hive_sf2
+    elif [[ "$VARIANT" == 'hive_118' ]]; then
+        CATALOG=hive
+        SESSION_PROPERTIES='--session hive.max_initial_split_size=118MB --session hive.max_split_size=118MB'
+        SCHEMA=tpch_hive_sf2
+    elif [[ "$VARIANT" == 'iceberg_118' ]]; then
+        CATALOG=iceberg
+        SESSION_PROPERTIES='--session iceberg.experimental_split_size=118MB'
+        SCHEMA=tpch_iceberg_sf2
+    elif [[ "$VARIANT" == 'delta_128' ]]; then
+        CATALOG=delta
+        SESSION_PROPERTIES='--session delta.max_initial_split_size=128MB --session delta.max_split_size=128MB'
+        SCHEMA=tpch_delta_sf2
+    elif [[ "$VARIANT" == 'delta_118' ]]; then
+        CATALOG=delta
+        SESSION_PROPERTIES='--session delta.max_initial_split_size=118MB --session delta.max_split_size=118MB'
+        SCHEMA=tpch_delta_sf2
+    else
+        CATALOG="$VARIANT"
+        SESSION_PROPERTIES=''
+        SCHEMA="tpch_${VARIANT}_sf2"
+    fi
+    # Warmup
+    for REP in $(seq 1 "$NUM_WARMUP"); do
+        $TRINO_HOME/bin/trino --catalog "$CATALOG" --schema "$SCHEMA" $SESSION_PROPERTIES --file sql/q1.sql --output-format NULL
+    done
+    # Benchmark
+    for REP in $(seq 1 "$NUM_REPS"); do
+        QUERY_ID="${VARIANT}_${REP}_$(openssl rand -hex 4)"
+        mcli admin trace minio > "${OUTPUT_PATH}/${VARIANT}_${REP}.trace" 2> /dev/null &
+        TRACE_PID=$!
+        sar -A -o "${OUTPUT_PATH}/${VARIANT}_${REP}.sar" 1 &> /dev/null &
+        SAR_PID=$!
+        $TRINO_HOME/bin/trino --source "$QUERY_ID" --catalog "$CATALOG" --schema "$SCHEMA" $SESSION_PROPERTIES --file sql/q1.sql --output-format NULL
+        kill -SIGINT "$SAR_PID"
+        kill -SIGINT "$TRACE_PID"
+        $TRINO_HOME/bin/trino --catalog system --schema runtime --execute "SELECT '$VARIANT' AS variant, '$REP' AS rep, TO_MILLISECONDS(\"end\" - started) AS time FROM queries WHERE source = '$QUERY_ID';" --output-format CSV_UNQUOTED >> "${OUTPUT_PATH}/times" 2> /dev/null
+    done
+done

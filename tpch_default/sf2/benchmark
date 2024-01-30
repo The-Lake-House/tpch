@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -eu
+
+OUTPUT_PATH=results
+NUM_REPS=30
+NUM_WARMUP=5
+
+mkdir -p "$OUTPUT_PATH"
+
+echo 'variant,rep,time' > "${OUTPUT_PATH}/times"
+for VARIANT in hive hudi iceberg delta; do
+    echo "$VARIANT ..."
+    # Warmup
+    for REP in $(seq 1 "$NUM_WARMUP"); do
+        $TRINO_HOME/bin/trino --catalog "$CATALOG" --schema "$SCHEMA" $SESSION_PROPERTIES --file sql/q1.sql --output-format NULL
+    done
+    # Benchmark
+    for REP in $(seq 1 "$NUM_REPS"); do
+        QUERY_ID="${VARIANT}_${REP}_$(openssl rand -hex 4)"
+        mcli admin trace minio > "${OUTPUT_PATH}/${VARIANT}_${REP}.trace" 2> /dev/null &
+        TRACE_PID=$!
+        sar -A -o "${OUTPUT_PATH}/${VARIANT}_${REP}.sar" 1 &> /dev/null &
+        SAR_PID=$!
+        $TRINO_HOME/bin/trino --source "$QUERY_ID" --catalog "$CATALOG" --schema "$SCHEMA" $SESSION_PROPERTIES --file sql/q1.sql --output-format NULL
+        kill -SIGINT "$SAR_PID"
+        kill -SIGINT "$TRACE_PID"
+        $TRINO_HOME/bin/trino --catalog system --schema runtime --execute "SELECT '$VARIANT' AS variant, '$REP' AS rep, TO_MILLISECONDS(\"end\" - started) AS time FROM queries WHERE source = '$QUERY_ID';" --output-format CSV_UNQUOTED >> "${OUTPUT_PATH}/times" 2> /dev/null
+    done
+done
